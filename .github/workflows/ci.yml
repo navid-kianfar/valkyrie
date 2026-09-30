@@ -52,9 +52,22 @@ jobs:
         run: pnpm -r build
 
   image:
-    name: Build image (linux/amd64, no push)
-    runs-on: ubuntu-latest
+    name: Build image (${{ matrix.platform }}, no push)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
+      - name: Prepare platform pair
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -62,13 +75,17 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # push: false, so no credentials are needed and this runs on a pull
-      # request from a fork as well. It is what proves the Dockerfile still
-      # builds; the release workflow only repeats it with `push=true`.
+      # request from a fork as well.
+      #
+      # Both architectures are built on every change, on a runner of that
+      # architecture: release.yml only runs on a v* tag, so without this an
+      # arm64-only break — a native dependency that stopped shipping arm64
+      # prebuilds, say — would not surface until the tag was already pushed.
       - name: Build the image
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=ci-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,mode=max,scope=ci-${{ env.PLATFORM_PAIR }}

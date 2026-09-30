@@ -270,6 +270,15 @@ git push origin v0.1.0
 
 Pre-release tags (`v0.2.0-rc1`) publish their own version tags but never move `:latest`.
 
+To confirm what a tag actually resolves to on your architecture:
+
+```bash
+docker buildx imagetools inspect kianfar/valkyrie:latest
+```
+
+Both architectures are built natively on a runner of that architecture rather than
+emulated, because the image compiles `better-sqlite3` during the build.
+
 To upgrade a deployment:
 
 ```bash
@@ -373,8 +382,10 @@ Worth understanding before you point it at production.
 
 - **checks** — `pnpm install --frozen-lockfile`, `tsc --noEmit` for both apps, then the
   full production build.
-- **image** — builds the Dockerfile for `linux/amd64` with no push and no credentials, so
-  a pull request from a fork is verified too.
+- **image** — builds the Dockerfile for **both** `linux/amd64` and `linux/arm64`, each on
+  a runner of that architecture, with no push and no credentials, so a pull request from
+  a fork is verified too. Both architectures are exercised on every change, not just when
+  a release is tagged.
 
 `.github/workflows/release.yml` runs on `v*` tags: it builds each architecture on a
 matching runner (`ubuntu-latest` for amd64, `ubuntu-24.04-arm` for arm64), pushes by
