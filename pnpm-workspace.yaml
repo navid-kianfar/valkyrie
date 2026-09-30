@@ -1,0 +1,10 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  better-sqlite3: true
+  cpu-features: true
+  esbuild: true
+  redis-memory-server: true
+  ssh2: true
