@@ -20,8 +20,15 @@ export function formatDuration(seconds: number, locale: string): string {
   return `${formatNumber(Math.floor(seconds / 86400), locale)}d`;
 }
 
+/** CLIENT LIST reports age/idle as whole seconds; -1 means "not applicable". */
+export function formatSeconds(seconds: number, locale: string): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '—';
+  return formatDuration(Math.floor(seconds), locale);
+}
+
 export function formatMs(ms: number | null | undefined, locale: string): string {
   if (ms === null || ms === undefined) return '—';
+  if (ms <= 0) return '<1 ms';
   if (ms < 1) return `${formatNumber(Math.round(ms * 1000), locale)} µs`;
   return `${formatNumber(ms, locale, ms < 10 ? 1 : 0)} ms`;
 }

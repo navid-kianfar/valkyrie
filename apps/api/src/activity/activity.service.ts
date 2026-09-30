@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, like, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gte, like, sql, type SQL } from 'drizzle-orm';
 import { DbService } from '../db/db.module';
 import { activity } from '../db/schema';
 
@@ -30,7 +30,7 @@ export class ActivityService {
     }).run();
   }
 
-  list(params: { page?: number; size?: number; operation?: string; sourceId?: number; status?: string; search?: string }) {
+  list(params: { page?: number; size?: number; operation?: string; sourceId?: number; status?: string; search?: string; since?: number }) {
     const page = Math.max(1, params.page ?? 1);
     const size = Math.min(200, Math.max(1, params.size ?? 30));
     const filters: SQL[] = [];
@@ -38,6 +38,7 @@ export class ActivityService {
     if (params.sourceId) filters.push(eq(activity.sourceId, params.sourceId));
     if (params.status) filters.push(eq(activity.status, params.status));
     if (params.search) filters.push(like(activity.target, `%${params.search}%`));
+    if (params.since) filters.push(gte(activity.at, params.since));
     const where = filters.length ? and(...filters) : undefined;
     const rows = this.db.db
       .select({

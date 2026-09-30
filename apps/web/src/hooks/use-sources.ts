@@ -1,32 +1,58 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { usePreferences } from '@/providers/preferences';
 import type { SourceDto, SourceStats } from '@valkyrie/shared';
 
 export type SourceWithStats = SourceDto & { stats: SourceStats };
-export const SOURCE_POLL_MS = 5000;
+
+export type SourceStatsWithHistory = SourceStats & { history: { t: number; usedMemory: number; opsPerSec: number; hitRate: number }[] };
+
+export interface SourceConnectionRow {
+  sshEnabled: boolean;
+  sshHost: string | null;
+  sshPort: number;
+  sshUser: string | null;
+  sentinelMaster: string | null;
+  tlsEnabled: boolean;
+  tlsSkipVerify: boolean;
+  tlsCaCert: string | null;
+  tlsSni: string | null;
+  visibleDbs: number;
+}
+
+export type SourceDetail = SourceWithStats & { row: SourceConnectionRow };
+
+/** Polling cadence mirrors the server's own health-poll setting (0 = manual only). */
+export function usePollMs(): number | false {
+  const { server } = usePreferences();
+  return server.pollSeconds > 0 ? server.pollSeconds * 1000 : false;
+}
 
 export function useSources() {
+  const pollMs = usePollMs();
   return useQuery({
     queryKey: ['sources'],
     queryFn: () => api.get<SourceWithStats[]>('/sources'),
-    refetchInterval: SOURCE_POLL_MS,
+    refetchInterval: pollMs,
   });
 }
 
 export function useSource(id: number | null) {
+  const pollMs = usePollMs();
   return useQuery({
     queryKey: ['source', id],
-    queryFn: () => api.get<SourceWithStats & { row: { sshEnabled: boolean; sshHost: string | null; sshPort: number; sshUser: string | null; sentinelMaster: string | null; tlsEnabled: boolean; tlsSkipVerify: boolean; visibleDbs: number } }>(`/sources/${id}`),
-    refetchInterval: SOURCE_POLL_MS,
+    queryFn: () => api.get<SourceDetail>(`/sources/${id}`),
+    refetchInterval: pollMs,
     enabled: id !== null,
   });
 }
 
 export function useSourceStats(id: number) {
+  const pollMs = usePollMs();
   return useQuery({
     queryKey: ['source-stats', id],
-    queryFn: () => api.get<SourceStats & { history: { t: number; usedMemory: number; opsPerSec: number; hitRate: number }[] }>(`/sources/${id}/stats`),
-    refetchInterval: SOURCE_POLL_MS,
+    queryFn: () => api.get<SourceStatsWithHistory>(`/sources/${id}/stats`),
+    refetchInterval: pollMs,
   });
 }
 

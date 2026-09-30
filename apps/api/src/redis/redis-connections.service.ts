@@ -97,7 +97,13 @@ export class RedisConnectionsService implements OnApplicationShutdown {
       port = await this.openTunnel(source);
       host = '127.0.0.1';
     }
-    const tls = source.tlsEnabled ? { rejectUnauthorized: !source.tlsSkipVerify } : undefined;
+    const tls = source.tlsEnabled
+      ? {
+          rejectUnauthorized: !source.tlsSkipVerify,
+          ...(source.tlsCa ? { ca: source.tlsCa } : {}),
+          ...(source.tlsSni ? { servername: source.tlsSni } : {}),
+        }
+      : undefined;
     const base = {
       password,
       connectTimeout: 6000,
@@ -197,6 +203,7 @@ export class RedisConnectionsService implements OnApplicationShutdown {
         memFragmentation: Number(fields.mem_fragmentation_ratio || 0),
         connectedClients: Number(fields.connected_clients || 0),
         blockedClients: Number(fields.blocked_clients || 0),
+        connectedReplicas: fields.connected_slaves === undefined ? undefined : Number(fields.connected_slaves),
         opsPerSec: Number(fields.instantaneous_ops_per_sec || 0),
         hitRate: hits + misses > 0 ? Math.round((hits / (hits + misses)) * 1000) / 10 : 0,
         uptimeDays: Math.floor(Number(fields.uptime_in_days || 0)),

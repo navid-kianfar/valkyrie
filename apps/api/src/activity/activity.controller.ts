@@ -13,6 +13,7 @@ export class ActivityController {
     @Query('sourceId') sourceId?: string,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('since') since?: string,
   ) {
     return this.activity.list({
       page: page ? Number(page) : undefined,
@@ -21,6 +22,7 @@ export class ActivityController {
       sourceId: sourceId ? Number(sourceId) : undefined,
       status: status || undefined,
       search: search || undefined,
+      since: since ? Number(since) : undefined,
     });
   }
 }

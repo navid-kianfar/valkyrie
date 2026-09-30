@@ -2,10 +2,10 @@ import { useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowRight, Check, CircleAlert, Lock, Play } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, CircleAlert, Lock, Play } from '@/components/icons';
 import { useI18n } from '@/i18n';
 import { api } from '@/lib/api';
-import { useSource } from '@/hooks/use-sources';
+import { useSource, useSources } from '@/hooks/use-sources';
 import { PageHeader } from '@/components/kit-extra';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -40,6 +40,7 @@ export function SourceWizardPage() {
   const editing = id !== undefined;
   const qc = useQueryClient();
   const { data: existing } = useSource(editing ? Number(id) : null);
+  const { data: sources } = useSources();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [loadedFor, setLoadedFor] = useState<number | null>(null);
@@ -48,20 +49,18 @@ export function SourceWizardPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (editing && existing && loadedFor !== existing.id && form === EMPTY) {
+  if (editing && existing && loadedFor !== existing.id) {
     setForm({
       ...EMPTY,
       name: existing.name, group: existing.group, host: existing.host, port: String(existing.port),
       username: existing.username ?? '', mode: existing.mode, readOnly: existing.readOnly,
       guardDangerous: existing.guardDangerous, scanCount: String(existing.scanCount), visibleDbs: String(existing.row.visibleDbs),
       tlsEnabled: existing.row.tlsEnabled, tlsSkipVerify: existing.row.tlsSkipVerify,
+      caCert: existing.row.tlsCaCert ?? '', sni: existing.row.tlsSni ?? '',
       sshEnabled: existing.row.sshEnabled, sshHost: existing.row.sshHost ?? '', sshPort: String(existing.row.sshPort), sshUser: existing.row.sshUser ?? '',
       sentinelMaster: existing.row.sentinelMaster ?? '',
     });
     setLoadedFor(existing.id);
-  }
-  if (editing && existing === undefined && form === EMPTY) {
-    // keep skeleton while loading
   }
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -77,10 +76,11 @@ export function SourceWizardPage() {
   function payload() {
     return {
       name: form.name.trim(), group: form.group.trim() || 'Default', host: form.host.trim(), port: Number(form.port),
-      username: form.username || undefined, password: form.password || undefined,
+      username: form.username.trim(), password: form.password || undefined,
       mode: form.mode,
-      tls: { enabled: form.tlsEnabled, skipVerify: form.tlsSkipVerify },
-      ssh: { enabled: form.sshEnabled, host: form.sshHost || undefined, port: Number(form.sshPort), username: form.sshUser || undefined, password: form.sshPassword || undefined, privateKey: form.sshPrivateKey || undefined },
+      /* empty strings mean "clear this field" — an omitted key would be kept as-is by the API */
+      tls: { enabled: form.tlsEnabled, skipVerify: form.tlsSkipVerify, caCert: form.caCert.trim(), sni: form.sni.trim() },
+      ssh: { enabled: form.sshEnabled, host: form.sshHost.trim(), port: Number(form.sshPort), username: form.sshUser.trim(), password: form.sshPassword || undefined, privateKey: form.sshPrivateKey || undefined },
       sentinelMaster: form.sentinelMaster || undefined,
       readOnly: form.readOnly, guardDangerous: form.guardDangerous,
       scanCount: Number(form.scanCount), visibleDbs: Number(form.visibleDbs),
@@ -90,13 +90,15 @@ export function SourceWizardPage() {
   async function runTest() {
     setTesting(true);
     setProbe(null);
+    setError(null);
     try {
       const res = await api.post<ProbeResult>('/sources/test', payload());
       setProbe(res);
-      if (!res.ok) setError(res.error ?? null); else setError(null);
+      if (!res.ok) setError(res.error ?? t('wizard.testFail'));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setProbe({ ok: false, error: String(e) });
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      setProbe({ ok: false, error: message });
     } finally {
       setTesting(false);
     }
@@ -104,11 +106,16 @@ export function SourceWizardPage() {
 
   async function save() {
     setSaving(true);
+    setError(null);
     try {
-      if (editing) await api.patch(`/sources/${id}`, payload());
-      else await api.post('/sources', payload());
+      if (editing) {
+        await api.patch(`/sources/${id}`, payload());
+        toast.success(t('wizard.updated'));
+      } else {
+        await api.post('/sources', payload());
+        toast.success(t('wizard.created'));
+      }
       void qc.invalidateQueries({ queryKey: ['sources'] });
-      toast.success(t('wizard.created'));
       navigate('/');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -142,7 +149,7 @@ export function SourceWizardPage() {
             <div key={label} className="flex items-center gap-3">
               <button type="button" className="flex items-center gap-2.5" onClick={() => setStep(i + 1)}>
                 <span className={cn(
-                  'flex size-6.5 h-[26px] w-[26px] items-center justify-center rounded-full border text-xs font-bold',
+                  'flex h-[26px] w-[26px] items-center justify-center rounded-full border text-xs font-bold',
                   step === i + 1 && 'border-primary bg-primary text-primary-foreground shadow-[0_0_0_3px] shadow-ring/30',
                   step > i + 1 && 'border-primary/30 bg-accent text-primary',
                   step < i + 1 && 'border-border bg-card text-muted-foreground',
@@ -156,16 +163,24 @@ export function SourceWizardPage() {
         <CardContent className="space-y-4 pt-5">
           {step === 1 && (
             <>
-              <Field label={t('common.name')} hint={t('wizard.nameHint')}>
-                <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="prod-redis-01" />
-              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t('common.name')} hint={t('wizard.nameHint')}>
+                  <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="prod-redis-01" />
+                </Field>
+                <Field label={t('common.group')} hint={t('wizard.groupHint')}>
+                  <Input value={form.group} onChange={(e) => set('group', e.target.value)} placeholder="Production" list="valkyrie-groups" />
+                  <datalist id="valkyrie-groups">
+                    {[...new Set((sources ?? []).map((s) => s.group))].filter((g) => g && g !== 'Default').map((g) => <option key={g} value={g} />)}
+                  </datalist>
+                </Field>
+              </div>
               <div className="grid gap-4 sm:grid-cols-[1fr_130px]">
                 <Field label={t('common.host')}><Input value={form.host} onChange={(e) => set('host', e.target.value)} placeholder="10.0.0.5" className="font-mono" /></Field>
                 <Field label={t('common.port')}><Input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} className="font-mono" /></Field>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label={`${t('common.username')} · ${t('wizard.optionalAcl')}`}><Input value={form.username} onChange={(e) => set('username', e.target.value)} placeholder="default" /></Field>
-                <Field label={t('common.password')}><Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} /></Field>
+                <Field label={t('common.password')} hint={editing ? t('wizard.passwordKeep') : undefined}><Input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} /></Field>
               </div>
             </>
           )}
@@ -174,10 +189,10 @@ export function SourceWizardPage() {
               <ToggleRow title={t('wizard.tls')} desc={t('wizard.tlsDesc')} checked={form.tlsEnabled} onChange={(v) => set('tlsEnabled', v)} />
               {form.tlsEnabled && (
                 <div className="space-y-3 rounded-xl border bg-secondary/40 p-4">
-                  <Field label={t('wizard.tlsCa')}>
-                    <Textarea rows={2} value={form.caCert} onChange={(e) => set('caCert', e.target.value)} placeholder="-----BEGIN CERTIFICATE-----" />
+                  <Field label={t('wizard.tlsCa')} hint={t('wizard.tlsCaHint')}>
+                    <Textarea rows={3} value={form.caCert} onChange={(e) => set('caCert', e.target.value)} placeholder="-----BEGIN CERTIFICATE-----" />
                   </Field>
-                  <Field label="SNI"><Input value={form.sni} onChange={(e) => set('sni', e.target.value)} /></Field>
+                  <Field label={t('wizard.tlsSni')} hint={t('wizard.tlsSniHint')}><Input value={form.sni} onChange={(e) => set('sni', e.target.value)} placeholder="redis.internal.acme.io" className="font-mono" /></Field>
                   <label className="flex items-center gap-2.5 text-sm">
                     <Switch checked={form.tlsSkipVerify} onCheckedChange={(v) => set('tlsSkipVerify', v)} />
                     {t('wizard.tlsSkip')} <span className="rounded-md border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[11px] font-semibold text-warning">{t('wizard.insecure')}</span>
@@ -269,7 +284,7 @@ export function SourceWizardPage() {
             {step < 4 ? (
               <Button onClick={() => setStep(step + 1)} disabled={!stepValid}>{t('common.next')}<ArrowRight className="size-4 rtl:-scale-x-100" /></Button>
             ) : (
-              <Button onClick={save} disabled={saving || !probe?.ok}>{saving ? t('common.loading') : t('common.save')}<Check className="size-4" /></Button>
+              <Button onClick={save} disabled={saving || !probe?.ok}>{saving ? t('common.loading') : editing ? t('common.save') : t('wizard.create')}<Check className="size-4" /></Button>
             )}
           </div>
         </CardContent>

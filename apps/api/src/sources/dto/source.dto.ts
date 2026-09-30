@@ -4,6 +4,8 @@ import { IsArray, IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString, Max, M
 export class TlsDto {
   @IsBoolean() enabled: boolean;
   @IsOptional() @IsBoolean() skipVerify?: boolean;
+  @IsOptional() @IsString() @MaxLength(20000) caCert?: string;
+  @IsOptional() @IsString() @MaxLength(255) sni?: string;
 }
 
 export class SshDto {

@@ -11,6 +11,8 @@ export const sources = sqliteTable('sources', {
   mode: text('mode').notNull().default('standalone'),
   tlsEnabled: integer('tls_enabled').notNull().default(0),
   tlsSkipVerify: integer('tls_skip_verify').notNull().default(0),
+  tlsCa: text('tls_ca'),
+  tlsSni: text('tls_sni'),
   sshEnabled: integer('ssh_enabled').notNull().default(0),
   sshHost: text('ssh_host'),
   sshPort: integer('ssh_port').notNull().default(22),

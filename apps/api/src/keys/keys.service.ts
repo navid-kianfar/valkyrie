@@ -4,6 +4,7 @@ import type { RedisLike } from '../redis/redis-connections.service';
 import { SourcesService } from '../sources/sources.service';
 import { RedisConnectionsService } from '../redis/redis-connections.service';
 import { ActivityService } from '../activity/activity.service';
+import { SettingsService } from '../settings/settings.module';
 
 const MAX_ITEMS = 1000;
 const WRITE_COMMANDS = new Set(['APPEND','DECR','DECRBY','DEL','EXPIRE','EXPIREAT','FLUSHALL','FLUSHDB','GETDEL','GETSET','HDEL','HSET','HSETNX','INCR','INCRBY','INCRBYFLOAT','LINSERT','LPOP','LPUSH','LPUSHX','LREM','LSET','LTRIM','MSET','PERSIST','PEXPIRE','PSETEX','RENAME','RENAMENX','RPOP','RPUSH','RPUSHX','SADD','SET','SETNX','SETRANGE','SINTERSTORE','SREM','UNLINK','XADD','XDEL','XTRIM','ZADD','ZINCRBY','ZPOPMAX','ZPOPMIN','ZREM','ZREMRANGEBYRANK','ZREMRANGEBYSCORE']);
@@ -14,7 +15,9 @@ export class KeysService {
     private sources: SourcesService,
     private connections: RedisConnectionsService,
     private activity: ActivityService,
+    private settings: SettingsService,
   ) {}
+
 
   private jsonSafe(value: unknown): unknown {
     if (Buffer.isBuffer(value)) return value.toString('utf8');
@@ -274,7 +277,9 @@ export class KeysService {
     const t0 = Date.now();
     const raw = await conn.call(cmd, ...tokens.slice(1));
     const durationMs = Date.now() - t0;
-    this.activity.record({ operation: 'exec', target: tokens.join(' ').slice(0, 200), sourceId: row.id, via, durationMs });
+    /* Settings → General decides whether arguments are recorded alongside the command. */
+    const target = this.settings.read().logCommands ? tokens.join(' ').slice(0, 200) : cmd;
+    this.activity.record({ operation: 'exec', target, sourceId: row.id, via, durationMs });
     return { result: this.jsonSafe(raw), durationMs };
   }
 

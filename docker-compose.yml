@@ -1,0 +1,16 @@
+services:
+  valkyrie:
+    image: kianfar/valkyrie:latest
+    ports:
+      - "8080:4000"
+    volumes:
+      # The SQLite database, and anything else Valkyrie persists.
+      - valkyrie-data:/app/data
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see .env.example}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env — see .env.example}
+    restart: unless-stopped
+
+volumes:
+  valkyrie-data:

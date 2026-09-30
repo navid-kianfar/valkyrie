@@ -1,0 +1,73 @@
+/* Bootstrap Icons v1.11.3 — subset generated from design/assets/icons (MIT).
+   Only the glyphs the console uses, so the stylesheet stays small. */
+@font-face {
+  font-display: block;
+  font-family: 'bootstrap-icons';
+  src: url('/icons/fonts/bootstrap-icons.woff2') format('woff2'), url('/icons/fonts/bootstrap-icons.woff') format('woff');
+}
+
+.bi {
+  display: inline-block;
+  font-family: 'bootstrap-icons' !important;
+  font-style: normal;
+  font-weight: 400 !important;
+  font-variant: normal;
+  line-height: 1;
+  vertical-align: -.125em;
+  text-transform: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.bi-activity::before { content: "\f66b"; }
+.bi-arrow-clockwise::before { content: "\f116"; }
+.bi-arrow-left::before { content: "\f12f"; }
+.bi-arrow-repeat::before { content: "\f130"; }
+.bi-arrow-right::before { content: "\f138"; }
+.bi-bell::before { content: "\f18a"; }
+.bi-book::before { content: "\f194"; }
+.bi-box-arrow-right::before { content: "\f1c3"; }
+.bi-check-lg::before { content: "\f633"; }
+.bi-chevron-down::before { content: "\f282"; }
+.bi-chevron-up::before { content: "\f286"; }
+.bi-circle-half::before { content: "\f288"; }
+.bi-clipboard::before { content: "\f290"; }
+.bi-clock::before { content: "\f293"; }
+.bi-clock-history::before { content: "\f292"; }
+.bi-display::before { content: "\f302"; }
+.bi-download::before { content: "\f30a"; }
+.bi-exclamation-circle::before { content: "\f333"; }
+.bi-exclamation-triangle::before { content: "\f33b"; }
+.bi-eye::before { content: "\f341"; }
+.bi-eye-slash::before { content: "\f340"; }
+.bi-folder::before { content: "\f3d7"; }
+.bi-globe::before { content: "\f3ee"; }
+.bi-grid::before { content: "\f3fc"; }
+.bi-grid-1x2::before { content: "\f3f4"; }
+.bi-hdd::before { content: "\f412"; }
+.bi-hdd-stack::before { content: "\f411"; }
+.bi-info-circle::before { content: "\f431"; }
+.bi-key::before { content: "\f44f"; }
+.bi-lightning-charge::before { content: "\f46d"; }
+.bi-list::before { content: "\f479"; }
+.bi-list-ul::before { content: "\f478"; }
+.bi-lock::before { content: "\f47b"; }
+.bi-moon-stars::before { content: "\f496"; }
+.bi-pencil::before { content: "\f4cb"; }
+.bi-play-fill::before { content: "\f4f4"; }
+.bi-plus-lg::before { content: "\f64d"; }
+.bi-radar::before { content: "\f8cf"; }
+.bi-search::before { content: "\f52a"; }
+.bi-shield-check::before { content: "\f52f"; }
+.bi-shield-slash::before { content: "\f53d"; }
+.bi-sliders::before { content: "\f56b"; }
+.bi-stack::before { content: "\f585"; }
+.bi-sun::before { content: "\f5a2"; }
+.bi-terminal::before { content: "\f5c3"; }
+.bi-three-dots::before { content: "\f5d4"; }
+.bi-translate::before { content: "\f658"; }
+.bi-trash3::before { content: "\f78b"; }
+.bi-upload::before { content: "\f603"; }
+.bi-x-lg::before { content: "\f659"; }
+.bi-lightning-charge-fill::before { content: "\f46c"; }
+.bi-chevron-right::before { content: "\f285"; }

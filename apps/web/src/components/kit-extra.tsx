@@ -1,8 +1,49 @@
-import { Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronRight, Loader2, Plus, Server } from '@/components/icons';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/i18n';
+import { Button } from '@/components/ui/button';
 
 export function Spinner({ className }: { className?: string }) {
   return <Loader2 className={cn('animate-spin text-muted-foreground', className)} />;
+}
+
+/** Standalone key-browser / console routes need a source before they can talk to Redis. */
+export function NoSourcesNotice() {
+  const { t } = useI18n();
+  return (
+    <div className="mx-auto max-w-xl py-20 text-center">
+      <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent text-primary"><Server className="size-6" /></div>
+      <h2 className="text-lg font-bold tracking-tight">{t('common.registerSource')}</h2>
+      <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">{t('common.registerSourceHint')}</p>
+      <Button asChild className="mt-5"><Link to="/sources/new"><Plus className="size-4" />{t('dash.addServer')}</Link></Button>
+    </div>
+  );
+}
+
+/**
+ * Source-scoped pages carry the same trail as the concept:
+ * Dashboard › <source> › <page>.
+ */
+function Crumb({ to, children }: { to: string; children: React.ReactNode }) {
+  return <Link to={to} className="text-muted-foreground hover:text-primary">{children}</Link>;
+}
+
+export function Breadcrumbs({ sourceId, sourceName, current }: { sourceId?: number; sourceName?: string; current: string }) {
+  const { t } = useI18n();
+  return (
+    <nav aria-label="Breadcrumb" className="mb-2 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
+      <Crumb to="/">{t('nav.dashboard')}</Crumb>
+      <ChevronRight className="size-3" />
+      {sourceId !== undefined && sourceName ? (
+        <>
+          <Crumb to={`/sources/${sourceId}`}>{sourceName}</Crumb>
+          <ChevronRight className="size-3" />
+        </>
+      ) : null}
+      <span className="text-muted-foreground">{current}</span>
+    </nav>
+  );
 }
 
 export function PageHeader({ title, desc, actions }: { title: React.ReactNode; desc?: React.ReactNode; actions?: React.ReactNode }) {

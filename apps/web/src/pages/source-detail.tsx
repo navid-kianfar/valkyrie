@@ -1,47 +1,73 @@
-import { useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Activity, ArrowRight, Pencil, Save, Server } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Activity, ArrowRight, Pencil } from '@/components/icons';
 import { useI18n } from '@/i18n';
 import { useSource, useSourceStats } from '@/hooks/use-sources';
-import { api } from '@/lib/api';
-import { formatBytes, formatMs, formatNumber } from '@/lib/format';
-import { PageHeader, StatCard } from '@/components/kit-extra';
+import { api, ApiError } from '@/lib/api';
+import { formatBytes, formatMs, formatNumber, formatSeconds, formatTime } from '@/lib/format';
+import { StatCard } from '@/components/kit-extra';
 import { AreaChart, Bars } from '@/components/charts';
 import { EngineChip, StatusDot } from '@/components/brand';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import type { KeyspaceEntry } from '@valkyrie/shared';
 
 export function SourceDetailPage() {
   const { t, locale } = useI18n();
-  const navigate = useNavigate();
+  const qc = useQueryClient();
   const id = Number(useParams().id);
   const { data: source } = useSource(id);
   const { data: stats } = useSourceStats(id);
   const [flushOpen, setFlushOpen] = useState(false);
+  const [flushDb, setFlushDb] = useState(0);
   const [flushWord, setFlushWord] = useState('');
   const [flushUnderstand, setFlushUnderstand] = useState(false);
-  const dbs = stats?.keyspace ?? [];
+  const [flushing, setFlushing] = useState(false);
+  const keyspace = stats?.keyspace;
+  const dbs = useMemo(() => keyspace ?? [], [keyspace]);
+  const visibleDbs = source?.row.visibleDbs ?? 16;
+
+  /* Preselect the busiest database — that is the one a flush is normally aimed at. */
+  const openFlush = useCallback(() => {
+    const busiest = [...dbs].sort((a, b) => b.keys - a.keys)[0];
+    setFlushDb(busiest?.db ?? 0);
+    setFlushWord('');
+    setFlushUnderstand(false);
+    setFlushOpen(true);
+  }, [dbs]);
+
+  const flushTarget = `db${flushDb}`;
+  const flushKeys = dbs.find((d) => d.db === flushDb)?.keys ?? 0;
 
   if (!source || !stats) return <DetailSkeleton />;
 
   const memPercent = stats.maxMemory > 0 ? Math.round((stats.usedMemory / stats.maxMemory) * 100) : 0;
   const topNs = [...dbs].sort((a, b) => b.keys - a.keys).slice(0, 4);
+  const replicas = stats.connectedReplicas;
 
-  async function flushDb() {
-    const word = flushTarget();
-    await api.post(`/sources/${id}/exec`, { command: `SELECT ${word.replace('db', '')}` });
-    await api.post(`/sources/${id}/exec`, { command: 'FLUSHDB' }).catch((e) => { toast.error(String(e.message ?? e)); return null; });
-    toast.success(t('server.flush.done'));
-    setFlushOpen(false);
+  async function flushDbNow() {
+    setFlushing(true);
+    try {
+      await api.post(`/sources/${id}/exec`, { db: flushDb, command: 'FLUSHDB' });
+      toast.success(t('server.flush.done'));
+      setFlushOpen(false);
+      void qc.invalidateQueries();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setFlushing(false);
+    }
   }
-  function flushTarget() { return 'db0'; }
 
   return (
     <div>
@@ -60,14 +86,14 @@ export function SourceDetailPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="outline"><Link to={`/sources/${id}/cli`}><Activity className="size-4" />{t('dash.menuConsole')}</Link></Button>
           <Button asChild variant="outline"><Link to={`/sources/${id}/edit`}><Pencil className="size-4" />{t('server.editConnection')}</Link></Button>
-          <Button variant="outline" onClick={() => setFlushOpen(true)}>{t('server.flushMenu')}</Button>
+          <Button variant="outline" onClick={openFlush}>{t('server.flushMenu')}</Button>
         </div>
       </header>
 
       <Tabs defaultValue="overview">
-        <TabsList className="mb-5 flex w-full flex-wrap gap-0 bg-transparent p-0">
+        <TabsList className="mb-5 flex w-full flex-wrap justify-start gap-0 border-b bg-transparent p-0">
           {[['overview', t('server.tabOverview')], ['databases', t('server.tabDatabases')], ['slowlog', t('server.tabSlowlog')], ['clients', t('server.tabClients')], ['config', t('server.tabConfig')]].map(([key, label]) => (
-            <TabsTrigger key={key} value={key} className="rounded-none border-b-2 border-transparent bg-transparent px-1 pb-2.5 pt-1 shadow-none data-[state=active]:rounded-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">{label}</TabsTrigger>
+            <TabsTrigger key={key} value={key} className="rounded-none border-b-2 border-transparent bg-transparent px-3 pb-2.5 pt-1 shadow-none data-[state=active]:rounded-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">{label}</TabsTrigger>
           ))}
         </TabsList>
 
@@ -90,7 +116,7 @@ export function SourceDetailPage() {
               <div className="rounded-xl border bg-card p-5 shadow-sm">
                 <div className="mb-2 text-[15px] font-semibold">{t('server.replication')}</div>
                 <div className="flex flex-col">
-                  {[['Role', stats.role ?? '—'], [t('server.replication.replicas'), '—'], [t('server.overview.frag', { ratio: '' }), formatNumber(stats.memFragmentation, locale, 2)]].map(([k, v], i) => (
+                  {[[t('server.replication.role'), stats.role ?? '—'], [t('server.replication.replicas'), replicas === undefined ? '—' : formatNumber(replicas, locale)], [t('server.overview.frag', { ratio: '' }), formatNumber(stats.memFragmentation, locale, 2)]].map(([k, v], i) => (
                     <div key={i} className="flex justify-between border-b border-dashed py-2 text-[13px] last:border-0"><dt className="text-muted-foreground">{k}</dt><dd className="font-semibold">{v}</dd></div>
                   ))}
                 </div>
@@ -122,16 +148,7 @@ export function SourceDetailPage() {
 
         <TabsContent value="databases">
           <p className="mb-3 text-sm text-muted-foreground">{t('server.databasesHint')}</p>
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
-            {dbs.map((db) => (
-              <Link key={db.db} to={`/sources/${id}/keys?db=${db.db}`} className={cn('group relative rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-px hover:shadow-md', db.keys === 0 && 'opacity-60')}>
-                <ArrowRight className="absolute end-3 top-3.5 size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 rtl:-scale-x-100" />
-                <div className="font-mono text-[13px] font-bold">db{db.db}</div>
-                <div className="mt-1.5 text-xl font-extrabold font-tabular">{formatNumber(db.keys, locale)}</div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">{t('dash.expires', { n: formatNumber(db.expires, locale) })}</div>
-              </Link>
-            ))}
-          </div>
+          <DatabasesPanel sourceId={id} />
         </TabsContent>
 
         <TabsContent value="slowlog"><SlowLogPanel sourceId={id} /></TabsContent>
@@ -142,13 +159,32 @@ export function SourceDetailPage() {
       <AlertDialog open={flushOpen} onOpenChange={setFlushOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('server.flush.title', { db: 'db0', source: source.name })}</AlertDialogTitle>
-            <AlertDialogDescription>{t('server.flush.desc', { keys: formatNumber(dbs[0]?.keys ?? 0, locale) })}</AlertDialogDescription>
+            <AlertDialogTitle>{t('server.flush.title', { db: flushTarget, source: source.name })}</AlertDialogTitle>
+            <AlertDialogDescription>{t('server.flush.desc', { keys: formatNumber(flushKeys, locale) })}</AlertDialogDescription>
           </AlertDialogHeader>
-          <div>
-            <label className="mb-1.5 block text-sm font-semibold">{t('server.flush.typeWord', { word: 'db0' })}</label>
-            <Input value={flushWord} onChange={(e) => setFlushWord(e.target.value)} placeholder="db0" className="font-mono" />
-            <label className="mt-3 flex cursor-pointer items-center gap-2.5 text-sm text-muted-foreground">
+          <div className="space-y-3">
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold">{t('server.flush.dbLabel')}</label>
+              <Select value={String(flushDb)} onValueChange={(v) => { setFlushDb(Number(v)); setFlushWord(''); }}>
+                <SelectTrigger className="w-48 font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Array.from({ length: visibleDbs }, (_, i) => {
+                    const dbKeys = dbs.find((d) => d.db === i)?.keys ?? 0;
+                    return <SelectItem key={i} value={String(i)}>db{i} · {formatNumber(dbKeys, locale)} {t('common.keys')}</SelectItem>;
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-semibold">{t('server.flush.typeWord', { word: flushTarget })}</label>
+              <Input value={flushWord} onChange={(e) => setFlushWord(e.target.value)} placeholder={flushTarget} className="font-mono" />
+              {flushWord.length > 0 && flushWord !== flushTarget && (
+                <p className="mt-1.5 text-xs text-warning">{t('server.flush.mismatch', { word: flushTarget })}</p>
+              )}
+            </div>
+            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-muted-foreground">
               <Checkbox checked={flushUnderstand} onCheckedChange={(v) => setFlushUnderstand(v === true)} />
               {t('server.flush.understand')}
             </label>
@@ -157,13 +193,12 @@ export function SourceDetailPage() {
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90 disabled:opacity-50"
-              disabled={flushWord !== 'db0' || !flushUnderstand}
-              onClick={flushDb}
-            >{t('server.flush.execute', { db: 'db0' })}</AlertDialogAction>
+              disabled={flushing || flushWord !== flushTarget || !flushUnderstand}
+              onClick={(e) => { e.preventDefault(); void flushDbNow(); }}
+            >{t('server.flush.execute', { db: flushTarget })}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <span className="hidden"><Server className="size-4" /></span>
     </div>
   );
 }
@@ -184,11 +219,44 @@ export function DetailSkeleton() {
   );
 }
 
+/** The overview tables only list non-empty databases; this panel shows every visible one. */
+function DatabasesPanel({ sourceId }: { sourceId: number }) {
+  const { t, locale } = useI18n();
+  const [rows, setRows] = useState<KeyspaceEntry[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    setRows(null);
+    api.get<KeyspaceEntry[]>(`/sources/${sourceId}/databases`)
+      .then((data) => { if (live) setRows(data); })
+      .catch((e) => { if (live) { setRows([]); toast.error(e instanceof ApiError ? e.message : String(e)); } });
+    return () => { live = false; };
+  }, [sourceId]);
+
+  if (rows === null) return <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>;
+  return (
+    <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
+      {rows.map((db) => (
+        <Link key={db.db} to={`/sources/${sourceId}/keys?db=${db.db}`} className={cn('group relative rounded-xl border bg-card p-4 shadow-sm transition-all hover:-translate-y-px hover:shadow-md', db.keys === 0 && 'opacity-60')}>
+          <ArrowRight className="absolute end-3 top-3.5 size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 rtl:-scale-x-100" />
+          <div className="font-mono text-[13px] font-bold">db{db.db}</div>
+          <div className="mt-1.5 text-xl font-extrabold font-tabular">{formatNumber(db.keys, locale)}</div>
+          <div className="mt-0.5 text-[11px] text-muted-foreground">{t('dash.expires', { n: formatNumber(db.expires, locale) })}</div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 function SlowLogPanel({ sourceId }: { sourceId: number }) {
   const { t, locale } = useI18n();
   const [entries, setEntries] = useState<{ id: number; at: string; durationMs: number; args: string[]; client: string }[] | null>(null);
-  useMemo(() => {
-    api.get<{ id: number; at: string; durationMs: number; args: string[]; client: string }[]>(`/sources/${sourceId}/slowlog?count=25`).then(setEntries).catch(() => setEntries([]));
+  useEffect(() => {
+    let live = true;
+    setEntries(null);
+    api.get<{ id: number; at: string; durationMs: number; args: string[]; client: string }[]>(`/sources/${sourceId}/slowlog?count=25`)
+      .then((rows) => { if (live) setEntries(rows); })
+      .catch((e) => { if (live) { setEntries([]); toast.error(e instanceof ApiError ? e.message : String(e)); } });
+    return () => { live = false; };
   }, [sourceId]);
   if (entries === null) return <Skeleton className="h-48 w-full rounded-xl" />;
   return (
@@ -199,7 +267,7 @@ function SlowLogPanel({ sourceId }: { sourceId: number }) {
           {entries.length === 0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground">{t('server.slowlog.empty')}</TableCell></TableRow>}
           {entries.map((e) => (
             <TableRow key={e.id}>
-              <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(e.at).toLocaleTimeString()}</TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">{formatTime(e.at, locale)}</TableCell>
               <TableCell className="font-mono text-xs">{e.args.join(' ').slice(0, 80)}</TableCell>
               <TableCell className={cn('text-end font-tabular', e.durationMs > 100 && 'font-bold text-destructive')}>{formatMs(e.durationMs, locale)}</TableCell>
               <TableCell className="text-end font-mono text-xs">{e.client}</TableCell>
@@ -214,30 +282,45 @@ function SlowLogPanel({ sourceId }: { sourceId: number }) {
 function ClientsPanel({ sourceId }: { sourceId: number }) {
   const { t, locale } = useI18n();
   const [clients, setClients] = useState<Record<string, string>[] | null>(null);
-  const qc = useQueryClientSafe();
-  useMemo(() => {
-    api.get<Record<string, string>[]>(`/sources/${sourceId}/clients`).then(setClients).catch(() => setClients([]));
+  const [killing, setKilling] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    api.get<Record<string, string>[]>(`/sources/${sourceId}/clients`)
+      .then(setClients)
+      .catch((e) => { setClients([]); toast.error(e instanceof ApiError ? e.message : String(e)); });
   }, [sourceId]);
-  if (clients === null) return <Skeleton className="h-48 w-full rounded-xl" />;
+
+  useEffect(() => { setClients(null); load(); }, [load]);
+
   async function kill(id: string) {
-    await api.post(`/sources/${sourceId}/exec`, { command: `CLIENT KILL ID ${id}` });
-    toast.success(t('server.clients.killed'));
-    qc.invalidateQueries();
+    setKilling(id);
+    try {
+      await api.post(`/sources/${sourceId}/exec`, { command: `CLIENT KILL ID ${id}` });
+      toast.success(t('server.clients.killed'));
+      load();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setKilling(null);
+    }
   }
+
+  if (clients === null) return <Skeleton className="h-48 w-full rounded-xl" />;
   return (
     <div className="rounded-xl border bg-card shadow-sm">
       <Table>
         <TableHeader><TableRow><TableHead>{t('server.clients.id')}</TableHead><TableHead>{t('server.clients.address')}</TableHead><TableHead>{t('common.name')}</TableHead><TableHead className="text-end">{t('server.clients.age')}</TableHead><TableHead className="text-end">{t('server.clients.idle')}</TableHead><TableHead>{t('common.status')}</TableHead><TableHead /></TableRow></TableHeader>
         <TableBody>
+          {clients.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground">{t('act.empty')}</TableCell></TableRow>}
           {clients.map((c) => (
             <TableRow key={c.id}>
               <TableCell className="font-mono text-xs">{c.id}</TableCell>
               <TableCell className="font-mono text-xs">{c.addr}</TableCell>
               <TableCell>{c.name || '—'}</TableCell>
-              <TableCell className="text-end font-tabular">{Number(c.age)}s</TableCell>
-              <TableCell className="text-end font-tabular">{Number(c.idle)}s</TableCell>
+              <TableCell className="text-end font-tabular">{formatSeconds(Number(c.age), locale)}</TableCell>
+              <TableCell className="text-end font-tabular">{formatSeconds(Number(c.idle), locale)}</TableCell>
               <TableCell>{Number(c.db) >= 0 ? <Badge className="font-mono">db{c.db}</Badge> : <Badge variant="outline">{c.flags}</Badge>}</TableCell>
-              <TableCell className="text-end"><Button variant="ghost" size="sm" onClick={() => kill(c.id)}>{t('server.clients.kill')}</Button></TableCell>
+              <TableCell className="text-end"><Button variant="ghost" size="sm" disabled={killing === c.id} onClick={() => kill(c.id)}>{t('server.clients.kill')}</Button></TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -246,25 +329,48 @@ function ClientsPanel({ sourceId }: { sourceId: number }) {
   );
 }
 
-import { Badge } from '@/components/ui/badge';
-import { useQueryClient } from '@tanstack/react-query';
-function useQueryClientSafe() { return useQueryClient(); }
-
 function ConfigPanel({ sourceId }: { sourceId: number }) {
   const { t, locale } = useI18n();
   const [entries, setEntries] = useState<{ key: string; value: string }[] | null>(null);
   const [dirty, setDirty] = useState<Record<string, string>>({});
-  useMemo(() => {
-    api.get<{ key: string; value: string }[]>(`/sources/${sourceId}/config`).then(setEntries).catch(() => setEntries([]));
+  const [applying, setApplying] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setEntries(null);
+    setDirty({});
+    api.get<{ key: string; value: string }[]>(`/sources/${sourceId}/config`)
+      .then((rows) => { if (live) setEntries(rows); })
+      .catch((e) => { if (live) { setEntries([]); toast.error(e instanceof ApiError ? e.message : String(e)); } });
+    return () => { live = false; };
   }, [sourceId]);
   const filtered = (entries || []).filter((e) => ['maxmemory', 'maxmemory-policy', 'appendonly', 'save', 'slowlog', 'timeout', 'databases', 'maxclients', 'tcp-keepalive'].some((f) => e.key.startsWith(f)));
+  const changedKeys = Object.keys(dirty).filter((k) => entries?.find((e) => e.key === k)?.value !== dirty[k]);
   if (entries === null) return <Skeleton className="h-64 w-full rounded-xl" />;
+
+  async function apply() {
+    const applied = Object.fromEntries(Object.entries(dirty).filter(([k, v]) => entries?.find((e) => e.key === k)?.value !== v));
+    if (Object.keys(applied).length === 0) return;
+    setApplying(true);
+    try {
+      await api.patch(`/sources/${sourceId}/config`, { entries: applied });
+      toast.success(t('server.config.applied'));
+      setDirty({});
+      const rows = await api.get<{ key: string; value: string }[]>(`/sources/${sourceId}/config`);
+      setEntries(rows);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <div>
       <div className="mb-4 rounded-xl border bg-card shadow-sm">
         <Table>
           <TableHeader><TableRow><TableHead>{t('server.config.parameter')}</TableHead><TableHead>{t('server.config.value')}</TableHead></TableRow></TableHeader>
           <TableBody>
+            {filtered.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground">{t('act.empty')}</TableCell></TableRow>}
             {filtered.map((e) => {
               const changed = dirty[e.key] !== undefined && dirty[e.key] !== e.value;
               return (
@@ -282,18 +388,13 @@ function ConfigPanel({ sourceId }: { sourceId: number }) {
           </TableBody>
         </Table>
       </div>
-      {Object.keys(dirty).filter((k) => entries.find((e) => e.key === k)?.value !== dirty[k]).length > 0 && (
+      {changedKeys.length > 0 && (
         <div className="sticky bottom-4 flex items-center gap-3 rounded-xl border border-primary/30 bg-card p-3 shadow-md">
-          <b className="text-sm">{t('server.config.unsaved', { n: Object.keys(dirty).filter((k) => entries.find((e) => e.key === k)?.value !== dirty[k]).length })}</b>
+          <b className="text-sm">{t('server.config.unsaved', { n: changedKeys.length })}</b>
           <span className="text-xs text-muted-foreground">{t('server.config.rewriteNote')}</span>
           <span className="flex-1" />
           <Button size="sm" variant="ghost" onClick={() => setDirty({})}>{t('server.config.discard')}</Button>
-          <Button size="sm" onClick={async () => {
-            const applied = Object.fromEntries(Object.entries(dirty).filter(([k, v]) => entries.find((e) => e.key === k)?.value !== v));
-            await api.patch(`/sources/${sourceId}/config`, { entries: applied });
-            toast.success(t('server.config.applied'));
-            setDirty({});
-          }}>{t('server.config.apply')}</Button>
+          <Button size="sm" disabled={applying} onClick={apply}>{t('server.config.apply')}</Button>
         </div>
       )}
       <span className="hidden">{t('common.loading')} {formatNumber(0, locale)}</span>

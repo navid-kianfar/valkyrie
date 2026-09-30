@@ -128,7 +128,14 @@ export class SourcesController {
   @Get(':id')
   async get(@Param('id', ParseIntPipe) id: number) {
     const row = await this.sources.get(id);
-    return { ...this.sources.list().find((s) => s.id === id), row: { sshEnabled: !!row.sshEnabled, sshHost: row.sshHost, sshPort: row.sshPort, sshUser: row.sshUser, sentinelMaster: row.sentinelMaster, tlsEnabled: !!row.tlsEnabled, tlsSkipVerify: !!row.tlsSkipVerify, visibleDbs: row.visibleDbs } };
+    return {
+      ...this.sources.list().find((s) => s.id === id),
+      row: {
+        sshEnabled: !!row.sshEnabled, sshHost: row.sshHost, sshPort: row.sshPort, sshUser: row.sshUser,
+        sentinelMaster: row.sentinelMaster, tlsEnabled: !!row.tlsEnabled, tlsSkipVerify: !!row.tlsSkipVerify,
+        tlsCaCert: row.tlsCa, tlsSni: row.tlsSni, visibleDbs: row.visibleDbs,
+      },
+    };
   }
 
   @Post()

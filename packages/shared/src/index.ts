@@ -33,11 +33,14 @@ export interface SourceStats {
   memFragmentation: number;
   connectedClients: number;
   blockedClients: number;
+  connectedReplicas?: number;
   opsPerSec: number;
   hitRate: number;
   uptimeDays: number;
   totalKeys: number;
   keyspace: KeyspaceEntry[];
+  /** Recent usedMemory samples, oldest → newest. Present on the source list only. */
+  spark?: number[];
 }
 
 export interface KeySummary { name: string; type: string; ttl: number; memory: number | null; }

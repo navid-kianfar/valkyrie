@@ -1,0 +1,74 @@
+name: CI
+
+# Every push and every pull request, except the v* tags — release.yml owns those
+# and builds the same image itself.
+on:
+  pull_request:
+  push:
+    # A push filter that names only tags matches no branch push at all, so the
+    # branches have to be listed explicitly for CI to run on them.
+    branches:
+      - '**'
+    tags-ignore:
+      - 'v*'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 12.8.1
+
+jobs:
+  checks:
+    name: Type check and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # pnpm pinned to the version the lockfile and the image were produced
+      # with, rather than whatever is newest on the day.
+      - name: Install pnpm
+        run: npm install -g pnpm@${PNPM_VERSION}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: tsc --noEmit (apps/api)
+        run: pnpm --filter @valkyrie/api type-check
+
+      - name: tsc --noEmit (apps/web)
+        run: pnpm --filter @valkyrie/web type-check
+
+      # Both workspaces, so a type-check that passes while the real build does
+      # not (nest build and vite build each do more) cannot slip through.
+      - name: Production build
+        run: pnpm -r build
+
+  image:
+    name: Build image (linux/amd64, no push)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # push: false, so no credentials are needed and this runs on a pull
+      # request from a fork as well. It is what proves the Dockerfile still
+      # builds; the release workflow only repeats it with `push=true`.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

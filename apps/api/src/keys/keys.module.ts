@@ -3,9 +3,10 @@ import { KeysController } from './keys.controller';
 import { KeysService } from './keys.service';
 import { SourcesModule } from '../sources/sources.module';
 import { ActivityModule } from '../activity/activity.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [SourcesModule, ActivityModule],
+  imports: [SettingsModule, SourcesModule, ActivityModule],
   controllers: [KeysController],
   providers: [KeysService],
 })

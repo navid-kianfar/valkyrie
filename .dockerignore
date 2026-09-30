@@ -1,0 +1,25 @@
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+
+# The database lives in a volume at runtime, never in an image layer.
+apps/api/data
+data
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Configuration is supplied at runtime (docker run -e / --env-file), so no env
+# file — not even .env.example — is allowed into the build context.
+**/.env
+**/.env.*
+**/pnpm-debug.log
+
+.git
+.github
+.idea
+design
+**/.DS_Store
+README.md

@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Info, Plus, ScanSearch, Upload, ArrowRight } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Info, Plus, ScanSearch, Upload, ArrowRight } from '@/components/icons';
 import { useI18n } from '@/i18n';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -15,11 +16,14 @@ interface ScanResult { host: string; port: number; open: boolean; }
 
 export function WelcomePage() {
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const [cidr, setCidr] = useState('');
   const [ports, setPorts] = useState('6379');
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<ScanResult[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function runScan() {
@@ -30,7 +34,8 @@ export function WelcomePage() {
       const res = await api.post<{ scanned: number; open: ScanResult[] }>('/sources/scan', { cidr: cidr.trim(), ports: portList });
       setResults(res.open);
       setSelected(new Set(res.open.map((r) => `${r.host}:${r.port}`)));
-      toast.success(t('welcome.scanFound', { n: res.open.length }));
+      if (res.open.length > 0) toast.success(t('welcome.scanFound', { n: res.open.length }));
+      else toast.info(t('welcome.scanNone'));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -39,31 +44,41 @@ export function WelcomePage() {
   }
 
   async function addSelected() {
-    if (!results) return;
+    if (!results || importing) return;
     const items = results.filter((r) => selected.has(`${r.host}:${r.port}`)).map((r) => ({
       name: `${r.host.replace(/\./g, '-')}-${r.port}`,
       host: r.host,
       port: r.port,
     }));
-    const res = await api.post<{ imported: number }>('/sources/import', { items });
-    toast.success(t('welcome.importDone', { n: res.imported }));
-    navigateHome();
+    if (items.length === 0) { toast.info(t('welcome.scanAddNone')); return; }
+    setImporting(true);
+    try {
+      const res = await api.post<{ imported: number }>('/sources/import', { items });
+      toast.success(t('welcome.importDone', { n: res.imported }));
+      qc.clear();
+      navigate('/');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function importFile(file: File) {
+    setImporting(true);
     try {
       const parsed = JSON.parse(await file.text());
       const items = Array.isArray(parsed) ? parsed : [parsed];
       const res = await api.post<{ imported: number }>('/sources/import', { items });
       toast.success(t('welcome.importDone', { n: res.imported }));
-      navigateHome();
+      qc.clear();
+      navigate('/');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = '';
     }
-  }
-
-  function navigateHome() {
-    window.location.href = '/';
   }
 
   return (
@@ -117,7 +132,7 @@ export function WelcomePage() {
                   );
                 })}
               </div>
-              <Button size="sm" className="mt-3" onClick={addSelected}>{t('welcome.scanAdd')}</Button>
+              <Button size="sm" className="mt-3" onClick={addSelected} disabled={importing || selected.size === 0}>{t('welcome.scanAdd')}{selected.size > 0 && ` (${selected.size})`}</Button>
             </div>
           )}
           {results && results.length === 0 && (
@@ -132,8 +147,8 @@ export function WelcomePage() {
               <b className="text-sm">{t('welcome.importTitle')}</b>
               <span className="block text-[13px] text-muted-foreground">{t('welcome.importDesc')}</span>
             </div>
-            <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); }} />
-            <Button variant="outline" onClick={() => fileRef.current?.click()}>{t('welcome.importPick')}</Button>
+            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); }} />
+            <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={importing}>{t('welcome.importPick')}</Button>
           </div>
           <p className="mt-3 text-xs text-muted-foreground">{t('welcome.importHint')}</p>
         </div>

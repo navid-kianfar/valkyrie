@@ -1,12 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import {
-  Activity, ChevronDown, ChevronUp, Clock, Globe, Key, LayoutDashboard, LogOut, Menu as MenuIcon,
+  Activity, ChevronDown, ChevronUp, Globe, Key, LayoutDashboard, LogOut, MenuIcon,
   Moon, Plus, Search, Server, Settings as SettingsIcon, SlidersHorizontal, Sun, Zap, Check, Bell, BookOpen,
-} from 'lucide-react';
+} from '@/components/icons';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Meter } from '@/components/kit';
 import { BrandChip, EngineChip, StatusDot } from '@/components/brand';
 import { CommandPalette } from '@/components/command-palette';
@@ -14,8 +12,9 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useI18n, LOCALES, type Locale } from '@/i18n';
 import { useTheme } from '@/providers/theme';
+import { usePreferences } from '@/providers/preferences';
 import { useAuth } from '@/providers/auth';
-import { engineOf, useSources } from '@/hooks/use-sources';
+import { useSources } from '@/hooks/use-sources';
 import { formatBytes } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -23,10 +22,10 @@ export function AppShell() {
   const { t, locale, setLocale } = useI18n();
   const { theme, setTheme, resolved } = useTheme();
   const { logout } = useAuth();
+  const { local } = usePreferences();
   const { data: sources } = useSources();
   const navigate = useNavigate();
   const location = useLocation();
-  const qc = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -48,7 +47,7 @@ export function AppShell() {
             {!collapsed && (
               <span className="min-w-0">
                 <span className="block text-[15px] font-bold leading-tight">{t('common.appName')}</span>
-                <span className="block truncate text-[10.5px] leading-tight text-muted-foreground">{t('common.appTag')}</span>
+                <span className="block truncate text-[10.5px] leading-tight text-muted-foreground">{local.consoleLabel || t('common.appTag')}</span>
               </span>
             )}
           </div>
@@ -94,7 +93,7 @@ export function AppShell() {
           </DropdownMenu>
 
           <nav className="flex flex-col gap-0.5 px-3 py-3">
-            <div className={cn('px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground', collapsed && 'text-center')}>{collapsed ? '·' : 'General'}</div>
+            <div className={cn('px-2.5 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground', collapsed && 'text-center')}>{collapsed ? '·' : t('nav.general')}</div>
             {[
               { to: '/', icon: LayoutDashboard, label: t('nav.dashboard'), end: true },
               { to: '/keys', icon: Key, label: t('nav.keyBrowser') },
@@ -251,6 +250,7 @@ function SunMoon2() {
 
 function pageTitle(pathname: string, t: (k: string, vars?: Record<string, string | number>) => string, sources?: { id: number; name: string }[]): string {
   if (pathname === '/') return t('nav.dashboard');
+  if (pathname === '/welcome') return t('welcome.title');
   if (/^\/sources\/(new|\d+)/.test(pathname)) {
     const id = Number(pathname.split('/')[2]);
     const src = sources?.find((x: { id: number; name: string }) => x.id === id);

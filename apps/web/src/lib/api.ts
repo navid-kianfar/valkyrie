@@ -26,7 +26,9 @@ async function request<T>(path: string, init?: RequestInit & { json?: unknown })
   });
   if (res.status === 401 && !path.startsWith('/auth')) {
     setToken(null);
-    window.location.href = '/login';
+    /* Hard-navigate to the sign-in screen once — reloading while already there
+       would re-mount the providers, re-issue the request and loop forever. */
+    if (window.location.pathname !== '/login') window.location.href = '/login';
     throw new ApiError(401, 'unauthorized');
   }
   const text = await res.text();

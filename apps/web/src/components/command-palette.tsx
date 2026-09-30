@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '@/providers/theme';
 import { useAuth } from '@/providers/auth';
 import { useI18n } from '@/i18n';
 import { useSources } from '@/hooks/use-sources';
 import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem, CommandShortcut } from '@/components/ui/command';
-import { Key, LayoutDashboard, History, Settings, Server, Plus, Zap, Terminal, SunMoon, LogOut } from 'lucide-react';
+import { Key, LayoutDashboard, History, Settings, Server, Plus, Zap, Terminal, SunMoon, LogOut } from '@/components/icons';
 
 export function CommandPalette({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => void }) {
   const { t } = useI18n();

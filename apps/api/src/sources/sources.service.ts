@@ -7,6 +7,7 @@ import { encryptSecret } from '../common/crypto.util';
 import { CreateSourceDto, UpdateSourceDto } from './dto/source.dto';
 import { RedisConnectionsService } from '../redis/redis-connections.service';
 import { ActivityService } from '../activity/activity.service';
+import { SettingsService } from '../settings/settings.module';
 import type { SourceDto, SourceStats } from '@valkyrie/shared';
 
 @Injectable()
@@ -19,16 +20,29 @@ export class SourcesService implements OnApplicationBootstrap, OnApplicationShut
     private config: ConfigService,
     private connections: RedisConnectionsService,
     private activity: ActivityService,
+    private settings: SettingsService,
   ) {}
 
   /* live health polling — every source is probed on a 5s cadence */
   onApplicationBootstrap() {
     void this.pollAll();
-    this.pollTimer = setInterval(() => { void this.pollAll(); }, 5000);
+    this.armPollTimer();
+    /* Settings → General can change the cadence (or switch polling off entirely). */
+    this.settings.onChange(() => this.armPollTimer());
   }
 
   onApplicationShutdown() {
-    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+  }
+
+  private armPollTimer() {
+    if (this.pollTimer) clearTimeout(this.pollTimer);
+    this.pollTimer = null;
+    const seconds = this.settings.read().pollSeconds;
+    if (seconds <= 0) return;
+    this.pollTimer = setTimeout(() => {
+      void this.pollAll().finally(() => this.armPollTimer());
+    }, seconds * 1000);
   }
 
   private async pollAll() {
@@ -71,10 +85,12 @@ export class SourcesService implements OnApplicationBootstrap, OnApplicationShut
 
   list(): Array<SourceDto & { stats: SourceStats }> {
     const rows = this.db.db.select().from(sources).all().sort((a, b) => a.id - b.id);
-    return rows.map((row) => ({
-      ...this.rowToDto(row),
-      stats: this.connections.stats.get(row.id) || { status: this.connections.statusOf(row) } as SourceStats,
-    }));
+    return rows.map((row) => {
+      const stats = (this.connections.stats.get(row.id) || { status: this.connections.statusOf(row) }) as SourceStats;
+      /* the last few memory samples ride along so source cards can draw a sparkline */
+      const spark = (this.connections.history.get(row.id) || []).slice(-24).map((h) => h.usedMemory);
+      return { ...this.rowToDto(row), stats: { ...stats, spark } };
+    });
   }
 
   async get(id: number): Promise<SourceRow> {
@@ -105,6 +121,8 @@ export class SourcesService implements OnApplicationBootstrap, OnApplicationShut
       mode: dto.mode ?? 'standalone',
       tlsEnabled: dto.tls?.enabled ? 1 : 0,
       tlsSkipVerify: dto.tls?.skipVerify ? 1 : 0,
+      tlsCa: dto.tls?.caCert?.trim() || null,
+      tlsSni: dto.tls?.sni?.trim() || null,
       sshEnabled: dto.ssh?.enabled ? 1 : 0,
       sshHost: dto.ssh?.host ?? null,
       sshPort: dto.ssh?.port ?? 22,
@@ -140,7 +158,10 @@ export class SourcesService implements OnApplicationBootstrap, OnApplicationShut
       password: enc.password ?? row.password,
       mode: dto.mode ?? row.mode,
       tlsEnabled: dto.tls ? (dto.tls.enabled ? 1 : 0) : row.tlsEnabled,
-      tlsSkipVerify: dto.tls ? (dto.tls.skipVerify ? 1 : 0) : row.tlsSkipVerify,
+      /* omitted tls keys keep their stored value; an empty string clears it */
+      tlsSkipVerify: dto.tls?.skipVerify === undefined ? row.tlsSkipVerify : (dto.tls.skipVerify ? 1 : 0),
+      tlsCa: dto.tls?.caCert === undefined ? row.tlsCa : (dto.tls.caCert.trim() || null),
+      tlsSni: dto.tls?.sni === undefined ? row.tlsSni : (dto.tls.sni.trim() || null),
       sshEnabled: dto.ssh ? (dto.ssh.enabled ? 1 : 0) : row.sshEnabled,
       sshHost: dto.ssh?.host ?? row.sshHost,
       sshPort: dto.ssh?.port ?? row.sshPort,
@@ -179,6 +200,7 @@ export class SourcesService implements OnApplicationBootstrap, OnApplicationShut
       password: dto.password ? encryptSecret(dto.password, secret) : null,
       mode: dto.mode ?? 'standalone',
       tlsEnabled: dto.tls?.enabled ? 1 : 0, tlsSkipVerify: dto.tls?.skipVerify ? 1 : 0,
+      tlsCa: dto.tls?.caCert?.trim() || null, tlsSni: dto.tls?.sni?.trim() || null,
       sshEnabled: dto.ssh?.enabled ? 1 : 0, sshHost: dto.ssh?.host ?? null, sshPort: dto.ssh?.port ?? 22,
       sshUser: dto.ssh?.username ?? null, sshPassword: this.encryptSsh(dto.ssh) ?? null,
       sshPrivateKey: dto.ssh?.privateKey ?? null,

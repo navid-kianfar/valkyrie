@@ -1,23 +1,22 @@
-import { useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronRight, Copy, Folder, Lock, MoreHorizontal, Pencil, Plus, Search, Terminal } from 'lucide-react';
+import { Copy, Folder, Lock, MoreHorizontal, Pencil, Plus, Search, Terminal, Trash2 } from '@/components/icons';
 import { useI18n } from '@/i18n';
 import { api } from '@/lib/api';
-import { useSource } from '@/hooks/use-sources';
+import { useSource, useSources } from '@/hooks/use-sources';
+import { usePreferences } from '@/providers/preferences';
 import { formatBytes, formatNumber } from '@/lib/format';
-import { PageHeader } from '@/components/kit-extra';
+import { Breadcrumbs, NoSourcesNotice } from '@/components/kit-extra';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -51,23 +50,39 @@ export function KeysPage() {
   const { t, locale } = useI18n();
   const qc = useQueryClient();
   const params = useParams();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const sourceId = params.id ? Number(params.id) : null;
+  const routeId = params.id ? Number(params.id) : null;
+  const { data: sources, isLoading: sourcesLoading } = useSources();
+  const sourceId = routeId ?? sources?.[0]?.id ?? null;
   const { data: source } = useSource(sourceId);
   const [db, setDb] = useState(Number(searchParams.get('db') ?? 0));
   const [match, setMatch] = useState(searchParams.get('match') ?? '*');
+  const [debouncedMatch, setDebouncedMatch] = useState(match);
   const [type, setType] = useState<string>('any');
   const [cursorStack, setCursorStack] = useState<number[]>([0]);
   const [selected, setSelected] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
 
-  const pageSize = Number(localStorage.getItem('valkyrie.pageSize') ?? 50);
-  const scanCount = Number(localStorage.getItem('valkyrie.scanCount') ?? 200);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedMatch(match), 250);
+    return () => clearTimeout(id);
+  }, [match]);
+
+  /* a new source, database or filter always restarts the keyspace walk */
+  useEffect(() => {
+    setCursorStack([0]);
+    setSelected(null);
+  }, [sourceId, db, debouncedMatch, type]);
+
+  const { local } = usePreferences();
+  const pageSize = local.pageSize;
+  const scanCount = local.scanCount;
 
   const cursor = cursorStack[cursorStack.length - 1];
   const scanQuery = useQuery({
-    queryKey: ['keys', sourceId, db, match, type, cursor],
-    queryFn: () => api.get<{ cursor: number; keys: KeySummary[] }>(`/sources/${sourceId}/keys?db=${db}&cursor=${cursor}&match=${encodeURIComponent(match)}${type !== 'any' ? `&type=${type}` : ''}&count=${scanCount}`),
+    queryKey: ['keys', sourceId, db, debouncedMatch, type, cursor],
+    queryFn: () => api.get<{ cursor: number; keys: KeySummary[] }>(`/sources/${sourceId}/keys?db=${db}&cursor=${cursor}&match=${encodeURIComponent(debouncedMatch)}${type !== 'any' ? `&type=${type}` : ''}&count=${scanCount}`),
     enabled: sourceId !== null,
   });
 
@@ -90,22 +105,32 @@ export function KeysPage() {
   }, [scanQuery.data]);
 
   const keys = scanQuery.data?.keys ?? [];
-  const ttlOf = (k: KeySummary) => (k.ttl === -1 ? t('common.noTtl') : k.ttl === -2 ? t('common.expired') : formatBytes(k.ttl, locale).replace(/\s?B/, 's'));
+  const visible = keys.slice(0, pageSize);
 
   async function deleteKey(name: string) {
-    await api.del(`/sources/${sourceId}/key?db=${db}&name=${encodeURIComponent(name)}`);
-    toast.success(t('keys.deleted'));
-    setSelected(null);
-    void qc.invalidateQueries({ queryKey: ['keys'] });
+    try {
+      await api.del(`/sources/${sourceId}/key?db=${db}&name=${encodeURIComponent(name)}`);
+      toast.success(t('keys.deleted'));
+      setSelected(null);
+      void qc.invalidateQueries({ queryKey: ['keys'] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   }
 
-  if (!sourceId || !source) return <KeysSkeleton />;
+  if (sourcesLoading || (sourceId !== null && !source)) return <KeysSkeleton />;
+  if (sourceId === null || !source) return <NoSourcesNotice />;
 
   return (
     <div>
+      <Breadcrumbs sourceId={sourceId} sourceName={source.name} current={t('keys.title')} />
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-2xl font-bold tracking-tight">{t('keys.title')}</h1>
+          <Select value={String(sourceId)} onValueChange={(v) => navigate(`/sources/${v}/keys`)}>
+            <SelectTrigger className="w-44" sizeVariant="sm"><SelectValue /></SelectTrigger>
+            <SelectContent>{sources?.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent>
+          </Select>
           <Select value={String(db)} onValueChange={(v) => { setDb(Number(v)); setCursorStack([0]); setSelected(null); }}>
             <SelectTrigger className="w-52" sizeVariant="sm"><SelectValue /></SelectTrigger>
             <SelectContent>{Array.from({ length: source.row.visibleDbs }, (_, i) => <SelectItem key={i} value={String(i)}>db{i}</SelectItem>)}</SelectContent>
@@ -113,7 +138,7 @@ export function KeysPage() {
           <Badge variant="outline" className="font-mono">{t('keys.scanCursor', { cursor: cursor })}</Badge>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button asChild variant="outline"><a href={`/sources/${sourceId}/cli`}><Terminal className="size-4" />{t('keys.console')}</a></Button>
+          <Button asChild variant="outline"><Link to={`/sources/${sourceId}/cli`}><Terminal className="size-4" />{t('keys.console')}</Link></Button>
           <Button onClick={() => setAddOpen(true)}><Plus className="size-4" />{t('keys.addKey')}</Button>
         </div>
       </header>
@@ -124,12 +149,12 @@ export function KeysPage() {
             <div className="relative"><Search className="pointer-events-none absolute start-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 ps-8 text-xs" placeholder={t('keys.namespaceFilter')} readOnly /></div>
           </div>
           <div className="flex-1 overflow-auto p-2">
-            <button className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[13px]', match === '*' && match === '*' ? 'bg-accent font-semibold' : 'hover:bg-secondary')} onClick={() => { setMatch('*'); }}>
-              <Folder className="size-3.5 text-muted-foreground" />{t('keys.allKeys')}<span className="ms-auto text-[11px] text-muted-foreground">{formatNumber(keys.length, locale)}</span>
+            <button className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[13px]', match === '*' ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-secondary hover:text-foreground')} onClick={() => setMatch('*')}>
+              <Folder className="size-3.5" />{t('keys.allKeys')}<span className="ms-auto text-[11px] text-muted-foreground">{formatNumber(keys.length, locale)}</span>
             </button>
             <div className="ms-5 flex flex-col gap-0.5 border-s ps-2">
               {namespaces.map(([ns, count]) => (
-                <button key={ns} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[13px]', match === `${ns}*` ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-secondary hover:text-foreground')} onClick={() => { setMatch(`${ns}*`); setCursorStack([0]); }}>
+                <button key={ns} className={cn('flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[13px]', match === `${ns}*` ? 'bg-accent font-semibold' : 'text-muted-foreground hover:bg-secondary hover:text-foreground')} onClick={() => setMatch(`${ns}*`)}>
                   <span className="truncate font-mono">{ns}</span><span className="ms-auto text-[11px] text-muted-foreground">{formatNumber(count, locale)}</span>
                 </button>
               ))}
@@ -157,9 +182,9 @@ export function KeysPage() {
           <div className="flex-1 overflow-auto p-1.5">
             {scanQuery.isLoading && <div className="space-y-1.5 p-2">{Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-9 w-full rounded-lg" />)}</div>}
             {scanQuery.data && keys.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">{t('act.empty')}</p>}
-            {keys.map((k) => (
+            {visible.map((k) => (
               <button key={k.name} className={cn('flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start', selected === k.name ? 'border border-primary/25 bg-accent' : 'border border-transparent hover:bg-secondary')} onClick={() => setSelected(k.name)}>
-                <span className={cn('flex size-6.5 h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg', TYPE_COLORS[k.type] || 'bg-muted text-muted-foreground')}>{typeIcon(k.type)}</span>
+                <span className={cn('flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg', TYPE_COLORS[k.type] || 'bg-muted text-muted-foreground')}>{typeIcon(k.type)}</span>
                 <span className="truncate font-mono text-xs">{k.name}</span>
                 <span className="ms-auto flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
                   <span className="font-tabular">{k.ttl > 0 ? `${t('common.ttl')} ${formatNumber(k.ttl, locale)}s` : k.ttl === -1 ? t('common.noTtl') : t('common.expired')}</span>
@@ -169,7 +194,7 @@ export function KeysPage() {
             ))}
           </div>
           <div className="flex items-center justify-between border-t px-3.5 py-2.5 text-[11.5px] text-muted-foreground">
-            <span>{formatNumber(keys.length, locale)} {t('common.keys')}</span>
+            <span>{t('keys.showing', { shown: formatNumber(visible.length, locale), total: formatNumber(keys.length, locale) })}</span>
             <div className="flex items-center gap-1.5">
               <Button variant="outline" size="sm" disabled={cursorStack.length <= 1} onClick={() => setCursorStack((st) => st.slice(0, -1))}>‹</Button>
               <Button variant="outline" size="sm" disabled={cursor === 0} onClick={() => setCursorStack((st) => [...st, scanQuery.data?.cursor ?? 0])}>›</Button>
@@ -200,7 +225,12 @@ function KeyDetailView({ sourceId, db, detail, onChanged, onDelete }: {
   const [ttl, setTtl] = useState(String(detail.ttl > 0 ? detail.ttl : 3600));
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTo, setRenameTo] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
 
+  const { local } = usePreferences();
+  const previewLimit = local.valuePreviewKb * 1024;
   const isString = detail.type === 'string';
   const entries: [string, string][] = useMemo(() => {
     const v = detail.value;
@@ -212,34 +242,76 @@ function KeyDetailView({ sourceId, db, detail, onChanged, onDelete }: {
     return [];
   }, [detail, isString]);
 
+  /** Opens the inline editor: raw text for strings, JSON for every other type. */
+  function startEditing(_field: string, _value: string) {
+    setEditValue(isString ? String(detail.value) : JSON.stringify(detail.value, null, 2));
+    setEditing(true);
+  }
+
   async function saveValue() {
     if (editValue === null) return;
     let parsed: unknown = editValue;
     if (!isString) {
       try { parsed = JSON.parse(editValue); } catch { /* keep raw */ }
     }
-    await api.put(`/sources/${sourceId}/key?name=${encodeURIComponent(detail.name)}`, { db, type: detail.type, value: parsed });
-    toast.success(t('keys.saved'));
-    setEditValue(null);
-    onChanged();
+    setBusy(true);
+    try {
+      await api.put(`/sources/${sourceId}/key?name=${encodeURIComponent(detail.name)}`, { db, type: detail.type, value: parsed });
+      toast.success(t('keys.saved'));
+      setEditValue(null);
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function applyTtl() {
-    await api.post(`/sources/${sourceId}/key/ttl`, { db, name: detail.name, ttl: Number(ttl) });
-    toast.success(t('keys.saved'));
-    onChanged();
+    setBusy(true);
+    try {
+      await api.post(`/sources/${sourceId}/key/ttl`, { db, name: detail.name, ttl: Number(ttl) });
+      toast.success(t('keys.saved'));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function rename() {
-    await api.post(`/sources/${sourceId}/key/rename`, { db, from: detail.name, to: renameTo });
-    toast.success(t('keys.renamed'));
-    setRenameOpen(false);
-    onChanged();
+    setBusy(true);
+    try {
+      await api.post(`/sources/${sourceId}/key/rename`, { db, from: detail.name, to: renameTo });
+      toast.success(t('keys.renamed'));
+      setRenameOpen(false);
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmDelete() {
+    setBusy(true);
+    try {
+      await onDelete();
+      setDeleteOpen(false);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function copyValue() {
-    await navigator.clipboard.writeText(JSON.stringify(detail.value, null, 2));
-    toast.success(t('common.copied'));
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(detail.value, null, 2));
+      toast.success(t('common.copied'));
+    } catch {
+      toast.error(t('common.copyFailed'));
+    }
   }
 
   return (
@@ -256,7 +328,7 @@ function KeyDetailView({ sourceId, db, detail, onChanged, onDelete }: {
               <DropdownMenuItem onSelect={copyValue}><Copy />{t('keys.menuCopy')}</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => { setRenameTo(detail.name); setRenameOpen(true); }}><Pencil />{t('keys.menuRename')}</DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem destructive onSelect={onDelete}>{t('keys.menuDelete')}</DropdownMenuItem>
+              <DropdownMenuItem destructive onSelect={() => setDeleteOpen(true)}><Trash2 />{t('keys.menuDelete')}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -273,18 +345,36 @@ function KeyDetailView({ sourceId, db, detail, onChanged, onDelete }: {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex gap-5 border-b px-4">
+        <div className="flex items-center gap-5 border-b px-4">
           <button className={cn('-mb-px border-b-2 py-2.5 text-sm font-semibold', view === 'table' ? 'border-primary' : 'border-transparent text-muted-foreground')} onClick={() => setView('table')}>{t('keys.tabValue')}</button>
           <button className={cn('-mb-px border-b-2 py-2.5 text-sm font-semibold', view === 'json' ? 'border-primary' : 'border-transparent text-muted-foreground')} onClick={() => setView('json')}>{t('keys.tabMeta')}</button>
         </div>
+
         <div className="flex-1 overflow-auto p-2.5">
           {view === 'table' ? (
             entries.length === 0 ? <p className="p-6 text-center text-sm text-muted-foreground">{t('act.empty')}</p> : (
               <div className="flex flex-col">
                 {entries.map(([k, v], i) => (
-                  <div key={i} className="grid grid-cols-[minmax(70px,32%)_1fr] items-start gap-3 border-b border-dashed px-2 py-2 text-xs hover:bg-secondary/60">
-                    <span className="break-all font-mono font-semibold text-muted-foreground">{isString ? k : k}</span>
-                    <span className="break-all font-mono">{v}</span>
+                  <div key={i} className="group grid grid-cols-[minmax(70px,32%)_1fr_auto] items-start gap-3 border-b border-dashed px-2 py-2 text-xs hover:bg-secondary/60">
+                    <span className="break-all font-mono font-semibold text-muted-foreground">{k}</span>
+                    <span className="break-all font-mono">
+                      {v.length > previewLimit ? `${v.slice(0, previewLimit)}…` : v}
+                      {v.length > previewLimit && (
+                        <span className="ms-2 whitespace-nowrap text-[10px] text-muted-foreground">
+                          {t('keys.truncated', { kb: local.valuePreviewKb, total: formatBytes(v.length, locale) })}
+                        </span>
+                      )}
+                    </span>
+                    {i === 0 && (
+                      <button
+                        type="button"
+                        className="text-muted-foreground opacity-0 transition-opacity hover:text-primary group-hover:opacity-100"
+                        aria-label={t('keys.tabValue')}
+                        onClick={() => startEditing(k, v)}
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -294,22 +384,53 @@ function KeyDetailView({ sourceId, db, detail, onChanged, onDelete }: {
               <div className="flex justify-between border-b border-dashed py-1.5"><span className="text-muted-foreground">{t('keys.encoding')}</span><span className="font-mono font-semibold">{detail.type}</span></div>
               <div className="flex justify-between border-b border-dashed py-1.5"><span className="text-muted-foreground">{t('keys.memoryUsage')}</span><span className="font-mono font-semibold">{detail.memory !== null ? formatBytes(detail.memory, locale) : '—'}</span></div>
               <div className="flex justify-between border-b border-dashed py-1.5"><span className="text-muted-foreground">{t('keys.length')}</span><span className="font-mono font-semibold">{formatNumber(detail.length ?? 0, locale)}</span></div>
-              <div className="flex justify-between border-b border-dashed py-1.5"><span className="text-muted-foreground">{t('common.ttl')}</span><span className="font-mono font-semibold">{detail.ttl}s</span></div>
+              <div className="flex justify-between border-b border-dashed py-1.5"><span className="text-muted-foreground">{t('common.ttl')}</span><span className="font-mono font-semibold">{detail.ttl > 0 ? `${formatNumber(detail.ttl, locale)}s` : detail.ttl === -1 ? t('common.noTtl') : t('common.expired')}</span></div>
             </div>
           )}
         </div>
+
+        {/* Editor sits inside the pane so the footer stays the last row, as in the concept. */}
+        {editing && (
+          <div className="border-t bg-secondary/40 p-3">
+            {isString ? (
+              <Textarea rows={4} value={editValue ?? ''} onChange={(e) => setEditValue(e.target.value)} className="bg-card text-xs" />
+            ) : (
+              <Textarea rows={5} value={editValue ?? ''} onChange={(e) => setEditValue(e.target.value)} className="bg-card text-xs" />
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-[11px] text-muted-foreground">
+                {isString ? t('keys.editStringHint') : t('keys.editJsonHint')}
+              </span>
+              <span className="flex-1" />
+              <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setEditValue(null); }}>{t('common.close')}</Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center justify-between border-t p-3.5">
         <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />{t('keys.saveNote')}</span>
         <div className="flex gap-1.5">
-          <Button size="sm" variant="ghost" disabled={editValue === null} onClick={() => setEditValue(null)}>{t('keys.revert')}</Button>
-          <Button size="sm" disabled={editValue === null} onClick={saveValue}>{t('common.save')}</Button>
+          <Button size="sm" variant="ghost" disabled={editValue === null} onClick={() => { setEditValue(null); setEditing(false); }}>{t('keys.revert')}</Button>
+          <Button size="sm" disabled={editValue === null || busy} onClick={saveValue}>{t('common.save')}</Button>
         </div>
       </div>
 
-      {isString && <StringValueEditor value={String(detail.value)} onChange={setEditValue} />}
-      {!isString && <EditToggle onChange={setEditValue} entries={entries} />}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('keys.deleteTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('keys.deleteDesc', { type: detail.type, length: detail.length ?? entries.length })}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-lg border bg-secondary/50 px-3.5 py-2.5 font-mono text-xs break-all">{detail.name}</div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-white hover:bg-destructive/90" disabled={busy} onClick={(e) => { e.preventDefault(); void confirmDelete(); }}>
+              {t('keys.deleteConfirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent className="max-w-sm">
@@ -322,35 +443,15 @@ function KeyDetailView({ sourceId, db, detail, onChanged, onDelete }: {
   );
 }
 
-function StringValueEditor({ value, onChange }: { value: string; onChange: (v: string | null) => void }) {
-  const { t } = useI18n();
-  const [editing, setEditing] = useState(false);
-  return editing ? (
-    <div className="border-t p-3.5">
-      <Textarea rows={4} value={value} onChange={(e) => onChange(e.target.value)} />
-      <Button size="sm" className="mt-2" onClick={() => setEditing(false)}>{t('common.close') as never}</Button>
-    </div>
-  ) : (
-    <div className="border-t p-3.5"><Button size="sm" variant="outline" onClick={() => { onChange(value); setEditing(true); }}><Pencil className="size-3.5" />{t('keys.tabValue')}</Button></div>
-  );
-}
-
-function EditToggle({ onChange, entries }: { onChange: (v: string | null) => void; entries: [string, string][] }) {
-  const { t } = useI18n();
-  return (
-    <div className="border-t p-3.5">
-      <Button size="sm" variant="outline" onClick={() => onChange(JSON.stringify(Object.fromEntries(entries), null, 2))}><Pencil className="size-3.5" />{t('keys.tabValue')}</Button>
-    </div>
-  );
-}
 
 function AddKeyDialog({ open, setOpen, sourceId, db, onCreated }: { open: boolean; setOpen: (v: boolean) => void; sourceId: number; db: number; onCreated: () => void }) {
   const { t } = useI18n();
   const [name, setName] = useState('');
   const [type, setType] = useState('string');
   const [fields, setFields] = useState<{ k: string; v: string }[]>([{ k: '', v: '' }]);
-  const [ttl, setTtl] = useState(Number(localStorage.getItem('valkyrie.defaultTtl') ?? 0));
-  const [useTtl, setUseTtl] = useState(false);
+  const { local } = usePreferences();
+  const [ttl, setTtl] = useState(local.defaultTtl);
+  const [useTtl, setUseTtl] = useState(local.defaultTtl > 0);
 
   async function create() {
     let value: unknown;

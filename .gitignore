@@ -1,15 +1,31 @@
-.idea
-node_modules
-dist
-**/node_modules
-**/dist
-design
-
-
+# Dependencies
 node_modules/
+**/node_modules
+
+# Build output
 dist/
+**/dist
+*.tsbuildinfo
+
+# Local database
 *.db
+*.db-shm
+*.db-wal
 *.db-journal
-.env
+apps/api/data/
 data/
+
+# Configuration and local secrets
+.env
+.env.*
+!.env.example
+
+# Design concept — kept locally, not part of the build
+design/
+
+# Editors and OS
+.idea/
+.vscode/
 .DS_Store
+*.log
+pnpm-debug.log*

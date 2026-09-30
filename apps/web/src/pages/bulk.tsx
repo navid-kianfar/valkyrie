@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Clock, Download, Pencil, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react';
+import { Check, Clock, Download, Info, Play, ShieldCheck, Trash2, TriangleAlert } from '@/components/icons';
 import { useI18n } from '@/i18n';
 import { api } from '@/lib/api';
 import { useSources } from '@/hooks/use-sources';
-import { formatBytes, formatNumber } from '@/lib/format';
+import { formatBytes, formatDuration, formatNumber } from '@/lib/format';
 import { PageHeader } from '@/components/kit-extra';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,7 +15,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
 import type { BulkJobDto } from '@valkyrie/shared';
 
@@ -37,7 +36,6 @@ export function BulkPage() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [understood, setUnderstood] = useState(false);
   const [job, setJob] = useState<BulkJobDto | null>(null);
-  const [flushOpen, setFlushOpen] = useState(false);
   const [flushDb, setFlushDb] = useState('0');
   const [flushWord, setFlushWord] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -93,6 +91,12 @@ export function BulkPage() {
     try {
       const token = localStorage.getItem('valkyrie.token') ?? '';
       const res = await fetch(`/api/sources/${sourceId}/export?db=${db}&match=${encodeURIComponent(pattern)}&format=${exportFormat}&limit=${exportLimit}`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        const body = await res.text();
+        let message = `Export failed (${res.status})`;
+        try { message = (JSON.parse(body) as { message?: string }).message ?? message; } catch { /* keep default */ }
+        throw new Error(message);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -103,9 +107,13 @@ export function BulkPage() {
 
   async function flush() {
     if (!sourceId) return;
-    await api.post(`/sources/${sourceId}/exec`, { db: Number(flushDb.replace('db', '')), command: 'FLUSHDB' });
-    toast.success(t('bulk.flush.done'));
-    setFlushOpen(false);
+    try {
+      await api.post(`/sources/${sourceId}/exec`, { db: Number(flushDb.replace('db', '')), command: 'FLUSHDB' });
+      toast.success(t('bulk.flush.done'));
+      setFlushWord('');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   }
 
   const ops: { id: Op; icon: typeof Trash2; title: string; desc: string; danger?: boolean }[] = [
@@ -125,6 +133,9 @@ export function BulkPage() {
       <div className="mb-5 grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(215px,1fr))]">
         {ops.map((o) => (
           <button key={o.id} className={cn('relative rounded-xl border bg-card p-4 text-start shadow-sm transition-all hover:-translate-y-px hover:shadow-md', op === o.id && 'border-primary shadow-[0_0_0_3px] shadow-ring/20', o.danger && 'border-destructive/40')} onClick={() => { setOp(o.id); setJob(null); setPreview(null); setUnderstood(false); }}>
+            {op === o.id && (
+              <span className="absolute end-3.5 top-3.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground"><Check className="size-3" /></span>
+            )}
             <span className={cn('mb-6 flex size-9 items-center justify-center rounded-lg', o.danger ? 'bg-destructive/10 text-destructive' : 'bg-secondary text-muted-foreground', op === o.id && !o.danger && 'bg-accent text-primary')}><o.icon className="size-4" /></span>
             <b className="block text-sm">{o.title}</b>
             <span className="text-xs text-muted-foreground">{o.desc}</span>
@@ -171,54 +182,59 @@ export function BulkPage() {
         <>
           <div className="mb-5 grid items-start gap-5 xl:grid-cols-2">
             <Card>
-              <CardHeader>
-                <div>
+              <CardHeader className="gap-1.5 space-y-0">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <CardTitle>{op === 'delete' ? t('bulk.form.title') : t('bulk.form.ttlTitle')}</CardTitle>
-                  <CardDescription>{op === 'delete' ? t('bulk.form.desc') : t('bulk.form.ttlDesc')}</CardDescription>
+                  {source && <Badge variant="outline" className="whitespace-nowrap font-mono">{source.name} · db{db}</Badge>}
                 </div>
-                {source && <Badge variant="outline" className="font-mono">{source.name} · db{db}</Badge>}
+                <CardDescription>{op === 'delete' ? t('bulk.form.stepDelete') : t('bulk.form.stepTtl')}</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+                <div className="grid gap-4 sm:grid-cols-2">
                   <div><Label className="mb-1.5">{t('bulk.form.source')}</Label><Select value={sourceId} onValueChange={setSourceId}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{sources?.map((s) => <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>)}</SelectContent></Select></div>
                   <div><Label className="mb-1.5">{t('bulk.form.database')}</Label><Select value={db} onValueChange={setDb}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Array.from({ length: 16 }, (_, i) => <SelectItem key={i} value={String(i)}>db{i}</SelectItem>)}</SelectContent></Select></div>
                   <div><Label className="mb-1.5">{t('bulk.form.pattern')}</Label><Input className="font-mono" value={pattern} onChange={(e) => setPattern(e.target.value)} /></div>
                   <div><Label className="mb-1.5">{t('bulk.form.type')}</Label><Select value={type} onValueChange={setType}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="any">{t('common.any')}</SelectItem>{['string', 'hash', 'list', 'set', 'zset', 'stream'].map((ty) => <SelectItem key={ty} value={ty}>{ty}</SelectItem>)}</SelectContent></Select></div>
                   {op === 'expire' && <div><Label className="mb-1.5">{t('bulk.form.ttlValue')}</Label><Input type="number" className="font-mono" value={ttl} onChange={(e) => setTtl(e.target.value)} /></div>}
                 </div>
-                {op === 'delete' && (
-                  <label className="flex cursor-pointer items-center gap-2.5 text-sm">
-                    <Checkbox checked={onlyTtl} onCheckedChange={(v) => setOnlyTtl(v === true)} />{t('bulk.form.onlyTtl')}
-                  </label>
-                )}
-                <div className="flex items-center justify-between border-t border-dashed pt-4">
-                  <Button variant="outline" onClick={dryRun} disabled={!sourceId}>{t('bulk.form.dryRun')}</Button>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {op === 'delete' ? (
+                    <label className="flex cursor-pointer items-center gap-2.5 text-sm">
+                      <Checkbox checked={onlyTtl} onCheckedChange={(v) => setOnlyTtl(v === true)} />{t('bulk.form.onlyTtl')}
+                    </label>
+                  ) : <span />}
+                  <Button variant="outline" onClick={dryRun} disabled={!sourceId}><Play className="size-3.5" />{t('bulk.form.dryRun')}</Button>
                 </div>
                 {preview && (
-                  <div className="flex items-center gap-2.5 rounded-lg border border-primary/30 bg-accent px-3.5 py-2.5 text-[13px]">
-                    <b>{t('bulk.dry.matched', { n: formatNumber(preview.matched, locale) })}</b>
-                    <span className="text-muted-foreground">{t('bulk.dry.sample', { n: preview.sample.length })}</span>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-primary/30 bg-accent px-3.5 py-2.5 text-[13px]">
+                    <Info className="size-4 shrink-0 text-primary" />
+                    <b>{t('bulk.dry.summary', { n: formatNumber(preview.matched, locale), size: formatBytes(preview.sample.reduce((sum, k) => sum + (k.memory ?? 0), 0), locale) })}</b>
+                    <span className="text-muted-foreground">{t('bulk.dry.seeAll')}</span>
                   </div>
                 )}
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
-                <div><CardTitle>{t('bulk.preview')}</CardTitle><CardDescription>{preview ? '' : t('bulk.previewNone')}</CardDescription></div>
-                {preview && <Badge variant="default">{t('bulk.form.dryRun')}</Badge>}
+              <CardHeader className="gap-1.5 space-y-0">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle>{preview ? t('bulk.previewTitle', { n: preview.sample.length, total: formatNumber(preview.matched, locale) }) : t('bulk.preview')}</CardTitle>
+                  {preview && <Badge variant="default" className="whitespace-nowrap">{t('bulk.dryTag')}</Badge>}
+                </div>
+                <CardDescription>{preview ? t('bulk.previewWhen') : t('bulk.previewNone')}</CardDescription>
               </CardHeader>
               <CardContent>
                 {preview ? (
                   <div className="overflow-hidden rounded-lg border">
                     <Table>
-                      <TableHeader><TableRow><TableHead>{t('common.name')}</TableHead><TableHead>{t('common.type')}</TableHead><TableHead className="text-end">{t('common.ttl')}</TableHead></TableRow></TableHeader>
+                      <TableHeader><TableRow><TableHead>{t('bulk.col.key')}</TableHead><TableHead>{t('common.type')}</TableHead><TableHead>{t('bulk.col.ttl')}</TableHead><TableHead className="text-end">{t('bulk.col.size')}</TableHead></TableRow></TableHeader>
                       <TableBody>
                         {preview.sample.map((k) => (
                           <TableRow key={k.name}>
                             <TableCell className="font-mono text-xs">{k.name}</TableCell>
                             <TableCell><Badge variant="secondary" className="font-mono">{k.type}</Badge></TableCell>
-                            <TableCell className="text-end font-tabular">{k.ttl > 0 ? formatNumber(k.ttl, locale) : t('common.noTtl')}</TableCell>
+                            <TableCell className="font-tabular text-muted-foreground">{k.ttl > 0 ? formatDuration(k.ttl, locale) : t('common.noTtl')}</TableCell>
+                            <TableCell className="text-end font-tabular text-muted-foreground">{k.memory !== null ? formatBytes(k.memory, locale) : '—'}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -254,7 +270,7 @@ export function BulkPage() {
                 {job && (
                   <div className="space-y-2 border-t border-dashed pt-4">
                     <div className="flex items-center justify-between text-sm">
-                      <span><b>{t('bulk.status.running')}</b></span>
+                      <span><b>{t('bulk.progressTitle')} · {t(`bulk.status.${job.status}` as never)}</b></span>
                       <span className="font-mono text-muted-foreground">{t('bulk.progress', { processed: formatNumber(job.processed, locale), matched: formatNumber(job.matched, locale), percent: Math.round((job.processed / Math.max(job.matched, 1)) * 100) })}</span>
                     </div>
                     <Progress value={Math.round((job.processed / Math.max(job.matched, 1)) * 100)} />
@@ -270,16 +286,6 @@ export function BulkPage() {
         </>
       )}
 
-      <AlertDialog open={flushOpen} onOpenChange={setFlushOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader><AlertDialogTitle>{t('bulk.opFlush')}</AlertDialogTitle><AlertDialogDescription>{t('bulk.flush.type', { word: flushDb })}</AlertDialogDescription></AlertDialogHeader>
-          <Input value={flushWord} onChange={(e) => setFlushWord(e.target.value)} className="font-mono" />
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-white" disabled={flushWord !== flushDb} onClick={flush}>{t('bulk.flush.execute', { db: flushDb })}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

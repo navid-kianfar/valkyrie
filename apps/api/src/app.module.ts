@@ -8,6 +8,7 @@ import { SourcesModule } from './sources/sources.module';
 import { KeysModule } from './keys/keys.module';
 import { BulkModule } from './bulk/bulk.module';
 import { InfoModule } from './info/info.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { InfoModule } from './info/info.module';
     KeysModule,
     BulkModule,
     InfoModule,
+    SettingsModule,
   ],
 })
 export class AppModule {}
